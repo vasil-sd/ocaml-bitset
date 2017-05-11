@@ -1,0 +1,7 @@
+description = "Library for manipulating sets from defined universe."
+version = "%%VERSION_NUM%%"
+requires = "bits"
+archive(byte) = "bitset.cma"
+archive(native) = "bitset.cmxa"
+plugin(byte) = "bitset.cma"
+plugin(native) = "bitset.cmxs"
