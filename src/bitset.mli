@@ -26,31 +26,25 @@
    OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
   ---------------------------------------------------------------------------*)
 
-module type ComparableType = sig
+module type UNIVERSE = sig
   type t
-  type comp_result = LT | EQ | GT
-  val compare : t -> t -> comp_result
-end
-
-module ToOrderedType (Ct : ComparableType) : (Set.OrderedType with type t = Ct.t)
-
-module type Universe = sig
-  type t
-  include ComparableType with type t := t
   val universe : t list
+  val compare : t -> t -> int
 end
 
-module type S_extension = sig
+module type S_EXTENSION = sig
+  type elt
   type t
-  val inv : t -> t (* complement to unverse*)
+  val inv : t -> t (* complement to unverse *)
+  val extend_universe : elt list -> unit
 end
 
-(* type of Bitset is compatible with Set.S *)
+(** type Bitset.S is compatible with Set.S *)
 module type S = sig
   type elt
   type t
   include Set.S with type t := t and type elt := elt
-  include S_extension with type t := t
+  include S_EXTENSION with type t := t and type elt := elt
 end
 
-module Make (U : Universe) : (S with type elt = U.t)
+module Make (U : UNIVERSE) : (S with type elt = U.t)
