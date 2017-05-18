@@ -42,16 +42,32 @@ end
 
 module Make (U : UNIVERSE) : (S with type elt = U.t) = struct
   type elt = U.t
-  type t = Bits.bits
+  type t = Bits.bits ref
 
   (** Universe *)
   let u = ref (Array.of_list (List.sort_uniq U.compare U.universe))
 
   exception Not_in_universe of elt
+  exception Set_is_larger_than_universe
 
   (** Helpers *)
 
-  (** Check if element in the universe and return its index*)
+  (** Check if set is not extended and extend it if neccessary *)
+
+  let maybe_extend s =
+    let s_len = Bits.length !s in
+    let u_len = Array.length !u in
+    if s_len <= u_len
+    then
+      if s_len = u_len
+      then s
+      else ref (Bits.extend !s 0 (u_len - s_len))
+    else
+      raise Set_is_larger_than_universe
+
+  let ( ~<> ) s = maybe_extend s
+
+  (** Check if element in the universe and return its index *)
   let check e =
     let n = ref 0 in
     if Array.exists
@@ -62,50 +78,50 @@ module Make (U : UNIVERSE) : (S with type elt = U.t) = struct
 
   (** Check existance of element e and make copy of bitset s *)
   let check_and_copy e s =
-    let copy_and_return n = (Bits.copy s), n in
+    let copy_and_return n = ref (Bits.copy !(~<>s)), n in
     check e |> copy_and_return
 
-  let set_bit bits index = Bits.set bits index true; bits
-  let set_bit_imp bits index = Bits.set bits index true
-  let clear_bit bits index = Bits.set bits index false; bits
+  let set_bit bits index = Bits.set !bits index true; bits
+  let set_bit_imp bits index = Bits.set !bits index true
+  let clear_bit bits index = Bits.set !bits index false; bits
   let ( ||> ) x f = let a, b = x in f a b
 
   let make_empty () = Bits.make (Array.length !u) false
-  let empty = make_empty ()
-  let is_empty s = Bits.equal empty s
-  let mem e s = check e |> Bits.get s
+  let empty = ref (make_empty ())
+  let is_empty s = Bits.all_zeros !s
+  let mem e s = check e |> Bits.get !s
   let add e s = check_and_copy e s ||> set_bit
-  let singleton e = check_and_copy e (make_empty ()) ||> set_bit
+  let singleton e = check_and_copy e (ref (make_empty ())) ||> set_bit
   let remove e s = check_and_copy e s ||> clear_bit
-  let union s1 s2 = Bits.(s1 lor s2)
-  let inter s1 s2 = Bits.(s1 land s2)
-  let diff s1 s2 = Bits.(land_inplace (lnot s2) s1)
-  let compare = Bits.compare
-  let equal = Bits.equal
-  let subset s1 s2 = equal (inter s1 s2) s1
-  let iter f s = Bits.iteri_on_val (fun n -> f !u.(n)) s true
+  let union s1 s2 = ref Bits.(!(~<>s1) lor !s2)
+  let inter s1 s2 = ref Bits.(!(~<>s1) land !s2)
+  let diff s1 s2 = ref Bits.(land_inplace (lnot !(~<>s2)) !s1)
+  let compare s1 s2 = Bits.compare !s1 !s2
+  let equal s1 s2 = Bits.equal !s1 !s2
+  let subset s1 s2 = Bits.subset !s1 !s2
+  let iter f s = Bits.iteri_on_val (fun n -> f !u.(n)) !s true
   let map f s =
-    let s1 = make_empty () in
-    Bits.(iteri_on_val (fun n -> check (f !u.(n)) |> set_bit_imp s1) s true);
+    let s1 = ref (make_empty ()) in
+    Bits.(iteri_on_val (fun n -> check (f !u.(n)) |> set_bit_imp s1) !s true);
     s1
   let fold f s x = let acc = ref x in iter (fun e -> acc := f e !acc) s; !acc
-  let for_all f s = Bits.for_all_values (fun n -> f !u.(n)) s true
-  let exists f s = Bits.exists_for_values (fun n -> f !u.(n)) s true
-  let filter f s = Bits.mapi_on_val (fun n -> f !u.(n)) s true
+  let for_all f s = Bits.for_all_values (fun n -> f !u.(n)) !s true
+  let exists f s = Bits.exists_for_values (fun n -> f !u.(n)) !s true
+  let filter f s = ref (Bits.mapi_on_val (fun n -> f !u.(n)) !(~<>s) true)
   let partition p s =
     let t = filter p s in
-    let f = Bits.(land_inplace (lnot t) s) in
+    let f = ref Bits.(land_inplace (lnot !t) !s) in
     (t, f)
   let elements s = List.rev (fold List.cons s [])
-  let cardinal s = Bits.count_val s true
-  let min_elt s = !u.(Bits.index s true)
-  let max_elt s = !u.(Bits.rindex s true)
+  let cardinal s = Bits.count_val !s true
+  let min_elt s = !u.(Bits.index !s true)
+  let max_elt s = !u.(Bits.rindex !s true)
   let choose = min_elt
   let find elt s =
-    let check_bit_for_elt n = if Bits.get s n then !u.(n) else raise Not_found in
+    let check_bit_for_elt n = if Bits.get !s n then !u.(n) else raise Not_found in
     check elt |> check_bit_for_elt
   let of_list l =
-    let s = make_empty () in
+    let s = ref (make_empty ()) in
     List.iter (fun e -> check e |> set_bit_imp s) l;
     s
   let split e s =
@@ -115,7 +131,7 @@ module Make (U : UNIVERSE) : (S with type elt = U.t) = struct
     filter (fun elt -> compare e elt == -1) s
 
   (* extensions to Set.S iface*)
-  let inv s = Bits.lnot s
+  let inv s = ref (Bits.lnot !(~<>s))
   let extend_universe l =
     let is_element_new e = not (Array.exists (fun el -> U.compare e el == 0) !u) in
     u := Array.append
@@ -123,5 +139,6 @@ module Make (U : UNIVERSE) : (S with type elt = U.t) = struct
            (Array.of_list
               (List.sort_uniq
                  U.compare
-                 (List.filter is_element_new l)))
+                 (List.filter is_element_new l)));
+    empty := make_empty ()
 end
